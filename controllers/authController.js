@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 
 // Helper to generate JWT token
@@ -89,8 +90,9 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const cleanEmail = email ? email.trim().toLowerCase() : '';
 
-    if (!email || !password) {
+    if (!cleanEmail || !password) {
       return res.status(400).json({
         success: false,
         message: 'Please provide email and password',
@@ -98,7 +100,7 @@ export const login = async (req, res) => {
     }
 
     // Find user by email
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: cleanEmail });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -222,6 +224,123 @@ export const toggleAvailability = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'Server error toggling availability',
+    });
+  }
+};
+
+// @desc    Forgot password — verify email+phone, return reset token
+// @route   POST /api/auth/forgot-password
+// @access  Public
+export const forgotPassword = async (req, res) => {
+  try {
+    const cleanEmail = email ? email.trim().toLowerCase() : '';
+    const cleanPhone = phone ? phone.trim() : '';
+
+    if (!cleanEmail || !cleanPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide both email and registered phone number for verification.',
+      });
+    }
+
+    const user = await User.findOne({ email: cleanEmail });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with this email address.',
+      });
+    }
+
+    // Verify phone number matches
+    const normalizePhone = (p) => p.replace(/[\s\-+]/g, '').slice(-10);
+    if (normalizePhone(user.phone) !== normalizePhone(phone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number does not match the registered account.',
+      });
+    }
+
+    // Generate a short-lived reset token (15 minutes)
+    const resetToken = jwt.sign(
+      { id: user._id, purpose: 'password-reset' },
+      process.env.JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Identity verified successfully. You can now reset your password.',
+      data: { resetToken, userName: user.name, userRole: user.role },
+    });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error during password recovery',
+    });
+  }
+};
+
+// @desc    Reset password using reset token
+// @route   POST /api/auth/reset-password
+// @access  Public (with valid reset token)
+export const resetPassword = async (req, res) => {
+  try {
+    const { resetToken, newPassword } = req.body;
+
+    if (!resetToken || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reset token and new password are required.',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long.',
+      });
+    }
+
+    // Verify reset token
+    let decoded;
+    try {
+      decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reset token is invalid or has expired. Please start over.',
+      });
+    }
+
+    if (decoded.purpose !== 'password-reset') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid reset token.',
+      });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User account not found.',
+      });
+    }
+
+    // Update password (pre-save hook will hash it)
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password has been reset successfully. Please sign in with your new password.',
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Server error during password reset',
     });
   }
 };

@@ -490,7 +490,9 @@ const seedDatabase = async () => {
         existing = await User.create(u);
         console.log(`  + Created user: ${u.email} (${u.role})`);
       } else {
-        console.log(`  = User already exists: ${u.email}`);
+        existing.password = u.password;
+        await existing.save();
+        console.log(`  = User password updated for: ${u.email}`);
       }
       userDocs[u.role] = existing;
     }

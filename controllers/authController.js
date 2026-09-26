@@ -233,6 +233,7 @@ export const toggleAvailability = async (req, res) => {
 // @access  Public
 export const forgotPassword = async (req, res) => {
   try {
+    const { email, phone } = req.body || {};
     const cleanEmail = email ? email.trim().toLowerCase() : '';
     const cleanPhone = phone ? phone.trim() : '';
 
